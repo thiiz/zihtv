@@ -1,0 +1,8 @@
+This directory contains profile avatar images.
+
+For a complete implementation, you would need to add actual avatar images named:
+- avatar1.png
+- avatar2.png
+- avatar3.png
+- avatar4.png
+- kids.png 

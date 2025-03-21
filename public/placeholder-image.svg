@@ -1,0 +1,9 @@
+<svg width="400" height="300" viewBox="0 0 400 300" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="400" height="300" fill="#1E293B"/>
+  <path d="M175.5 135C175.5 151.569 162.069 165 145.5 165C128.931 165 115.5 151.569 115.5 135C115.5 118.431 128.931 105 145.5 105C162.069 105 175.5 118.431 175.5 135Z" fill="#334155"/>
+  <path d="M255.5 150L215.5 190L235.5 210L285.5 160L255.5 150Z" fill="#334155"/>
+  <path d="M115.5 180L155.5 180L205.5 230L95.5 230L115.5 180Z" fill="#334155"/>
+  <path d="M235.5 210L205.5 230L285.5 230L285.5 160L235.5 210Z" fill="#475569"/>
+  <path d="M215.5 190L235.5 210L205.5 230L155.5 180L215.5 190Z" fill="#475569"/>
+  <text x="200" y="270" font-family="Arial" font-size="16" text-anchor="middle" fill="#94A3B8">Imagem não disponível</text>
+</svg> 
