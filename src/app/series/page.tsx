@@ -107,10 +107,9 @@ export default function SeriesPage() {
 
                 setSeriesList(seriesData.data || []);
                 setFilteredSeries(seriesData.data || []);
-
                 // Armazenar dados no IndexedDB para uso futuro
-                await db.saveSeriesCategories(profile.id, categoriesData.data || []);
-                await db.saveSeriesStreams(profile.id, seriesData.data || []);
+                // await db.saveSeriesCategories(profile.id, categoriesData.data || []);
+                // await db.saveSeriesStreams(profile.id, seriesData.data || []);
             }
 
         } catch (err) {

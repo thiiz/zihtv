@@ -3,6 +3,7 @@
 import { ProfileData } from '@/@types/ProfileData';
 import { Spinner } from '@/components/Spinner';
 import { db } from '@/lib/db'; // Importamos a instância do IndexedDB
+import customImageLoader from '@/lib/imageLoader';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -18,30 +19,46 @@ interface SeriesInfo {
         genre: string;
         releaseDate: string;
         rating: string;
-        backdrop_path: string;
+        rating_5based?: number;
+        backdrop_path?: string[] | string;
+        youtube_trailer?: string;
+        episode_run_time?: string;
+        last_modified?: string;
+        category_id?: string;
     };
-    seasons: {
-        [key: string]: {
-            air_date: string;
-            episode_count: number;
-            name: string;
-            overview: string;
-            season_number: string;
-            cover: string;
-            episodes: {
-                id: string;
-                episode_num: string;
-                title: string;
-                container_extension: string;
-                info: {
-                    duration_secs: number;
-                    movie_image: string;
-                    plot: string;
-                };
-            }[];
-        };
+    episodes: {
+        [key: string]: Array<{
+            id: string;
+            episode_num: number;
+            title: string;
+            container_extension: string;
+            info: {
+                duration: string;
+                duration_secs: number;
+                movie_image: string;
+                plot: string;
+                rating: string;
+                releasedate: string;
+                season?: string;
+                tmdb_id?: string;
+                bitrate?: number;
+            };
+            added: string;
+            custom_sid: string | null;
+            direct_source: string;
+            season: number | string;
+        }>;
     };
-}
+    seasons: Array<{
+        air_date?: string;
+        episode_count?: number;
+        id?: string;
+        name?: string;
+        overview?: string;
+        season_number?: number;
+        cover?: string;
+    }>;
+};
 
 export default function SeriesDetailsPage({ params }: { params: Usable<{ id: string }> }) {
     const router = useRouter();
@@ -54,7 +71,7 @@ export default function SeriesDetailsPage({ params }: { params: Usable<{ id: str
     const [seriesInfo, setSeriesInfo] = useState<SeriesInfo | null>(null);
     const [selectedSeason, setSelectedSeason] = useState<string>('');
     const [error, setError] = useState<string | null>(null);
-
+    console.log("seriesInfo: ", seriesInfo || {})
     // Carregar o perfil selecionado do IndexedDB
     useEffect(() => {
         async function loadProfile() {
@@ -92,7 +109,7 @@ export default function SeriesDetailsPage({ params }: { params: Usable<{ id: str
                 }
 
                 // Construir URL diretamente no formato solicitado
-                const apiUrl = `http://${url}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_series_info&series_id=${seriesId}`;
+                const apiUrl = `${url}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_series_info&series_id=${seriesId}`;
 
                 const response = await fetch(apiUrl);
                 if (!response.ok) {
@@ -186,6 +203,7 @@ export default function SeriesDetailsPage({ params }: { params: Usable<{ id: str
                                     src={seriesInfo.info.cover}
                                     alt={seriesInfo.info.name}
                                     layout="fill"
+                                    loader={customImageLoader}
                                     objectFit="cover"
                                     className="w-full h-full object-cover"
                                     onError={(e) => {
@@ -256,83 +274,74 @@ export default function SeriesDetailsPage({ params }: { params: Usable<{ id: str
                 </div>
 
                 {/* Seasons and Episodes */}
-                {Object.keys(seriesInfo.seasons).length > 0 && (
-                    <div className="bg-gray-800 rounded-lg shadow-lg p-4">
-                        <h3 className="text-xl font-bold mb-4">Seasons & Episodes</h3>
+                <div className="bg-gray-800 rounded-lg shadow-lg p-4">
+                    <h3 className="text-xl font-bold mb-4">Seasons & Episodes</h3>
 
-                        {/* Season Tabs */}
-                        <div className="mb-6 overflow-x-auto">
-                            <div className="flex space-x-2 pb-2">
-                                {Object.keys(seriesInfo.seasons).map((seasonNum) => (
-                                    <button
-                                        key={seasonNum}
-                                        onClick={() => handleSeasonClick(seasonNum)}
-                                        className={`px-4 py-2 rounded-full whitespace-nowrap ${selectedSeason === seasonNum
-                                            ? 'bg-blue-600 text-white'
-                                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                                            }`}
+                    {/* Season Tabs */}
+                    <div className="mb-6 overflow-x-auto">
+                        <div className="flex space-x-2 pb-2">
+                            {Object.keys(seriesInfo.episodes).map((seasonNum) => (
+                                <button
+                                    key={seasonNum}
+                                    onClick={() => handleSeasonClick(seasonNum)}
+                                    className={`px-4 py-2 rounded-full whitespace-nowrap ${selectedSeason === seasonNum
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                                        }`}
+                                >
+                                    Season {seasonNum}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Episodes List */}
+                    {selectedSeason && seriesInfo.episodes[selectedSeason] && (
+                        <div>
+                            <div className="mb-4">
+                                <h4 className="text-lg font-semibold">
+                                    Season {selectedSeason}
+                                </h4>
+                                <p className="text-gray-400 mt-1">
+                                    {seriesInfo.episodes[selectedSeason].length} episodes
+                                </p>
+                            </div>
+
+                            <div className="grid gap-3">
+                                {seriesInfo.episodes[selectedSeason].map((episode) => (
+                                    <div
+                                        key={episode.id}
+                                        className="bg-gray-700 rounded-lg p-4 hover:bg-gray-600 cursor-pointer transition-colors"
+                                        onClick={() => handleEpisodeClick(episode.id, episode.container_extension)}
                                     >
-                                        Season {seasonNum}
-                                    </button>
+                                        <div className="flex items-center">
+                                            <div className="flex-shrink-0 w-12 h-12 bg-gray-800 rounded-full flex items-center justify-center mr-4">
+                                                <span className="font-bold">{episode.episode_num}</span>
+                                            </div>
+                                            <div className="flex-1">
+                                                <h5 className="font-semibold">{episode.title}</h5>
+                                                {episode.info && episode.info.plot && (
+                                                    <p className="text-gray-400 text-sm mt-1 line-clamp-2">{episode.info.plot}</p>
+                                                )}
+                                                {episode.info && episode.info.duration_secs && (
+                                                    <p className="text-xs text-gray-500 mt-1">
+                                                        Duration: {Math.floor(episode.info.duration_secs / 60)} min
+                                                    </p>
+                                                )}
+                                            </div>
+                                            <div className="ml-4">
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                </svg>
+                                            </div>
+                                        </div>
+                                    </div>
                                 ))}
                             </div>
                         </div>
-
-                        {/* Episodes List */}
-                        {selectedSeason && seriesInfo.seasons[selectedSeason] && (
-                            <div>
-                                <div className="mb-4">
-                                    <h4 className="text-lg font-semibold">
-                                        {seriesInfo.seasons[selectedSeason].name}
-                                    </h4>
-                                    {seriesInfo.seasons[selectedSeason].overview && (
-                                        <p className="text-gray-400 mt-1">
-                                            {seriesInfo.seasons[selectedSeason].overview}
-                                        </p>
-                                    )}
-                                    {seriesInfo.seasons[selectedSeason].air_date && (
-                                        <p className="text-sm text-gray-500 mt-1">
-                                            Air Date: {seriesInfo.seasons[selectedSeason].air_date}
-                                        </p>
-                                    )}
-                                </div>
-
-                                <div className="grid gap-3">
-                                    {seriesInfo.seasons[selectedSeason].episodes.map((episode) => (
-                                        <div
-                                            key={episode.id}
-                                            className="bg-gray-700 rounded-lg p-4 hover:bg-gray-600 cursor-pointer transition-colors"
-                                            onClick={() => handleEpisodeClick(episode.id, episode.container_extension)}
-                                        >
-                                            <div className="flex items-center">
-                                                <div className="flex-shrink-0 w-12 h-12 bg-gray-800 rounded-full flex items-center justify-center mr-4">
-                                                    <span className="font-bold">{episode.episode_num}</span>
-                                                </div>
-                                                <div className="flex-1">
-                                                    <h5 className="font-semibold">{episode.title}</h5>
-                                                    {episode.info && episode.info.plot && (
-                                                        <p className="text-gray-400 text-sm mt-1 line-clamp-2">{episode.info.plot}</p>
-                                                    )}
-                                                    {episode.info && episode.info.duration_secs && (
-                                                        <p className="text-xs text-gray-500 mt-1">
-                                                            Duration: {Math.floor(episode.info.duration_secs / 60)} min
-                                                        </p>
-                                                    )}
-                                                </div>
-                                                <div className="ml-4">
-                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                                    </svg>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                )}
+                    )}
+                </div>
             </div>
         </div>
     );
