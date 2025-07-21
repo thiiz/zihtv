@@ -76,7 +76,7 @@ export default function PlayerPage({ params }: {
                 switch (type) {
                     case 'live':
                         streamType = 'Live TV';
-                        apiUrl = `/api/iptv/stream?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&url=${encodeURIComponent(url)}&stream_id=${id}&stream_type=live${ext ? `&ext=m3u8` : ''}`;
+                        apiUrl = `/api/iptv/stream?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&url=${encodeURIComponent(url)}&stream_id=${id}&stream_type=live${ext ? `&ext=m3u8` : '&ext=m3u8'}`;
                         break;
                     case 'movie':
                         streamType = 'Movie';
