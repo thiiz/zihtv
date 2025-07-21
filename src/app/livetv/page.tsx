@@ -130,8 +130,8 @@ export default function LiveTVPage() {
 
     const handleChannelClick = (streamId: number) => {
         // Formato padrão é ts, mas poderia ser configurável pelo usuário
-        const preferredFormat = 'ts'; // Opções: 'ts' ou 'm3u8'
-        router.push(`/player/live/${streamId}?ext=${preferredFormat}`);
+        const preferredFormat = 'm3u8'; // Opções: 'ts' ou 'm3u8'
+        router.push(`/player/live/${streamId}?format=${preferredFormat}`);
     };
 
     // Load more channels when scrolling

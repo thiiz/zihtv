@@ -146,7 +146,7 @@ export default function SeriesDetailsPage({ params }: { params: Usable<{ id: str
     const handleEpisodeClick = (episodeId: string, containerExtension: string) => {
         // Usamos o container como formato principal, mas também podemos especificar um formato alternativo
         // Formato padrão é o container do episódio, mas poderia ser configurável pelo usuário
-        router.push(`/player/episode/${episodeId}?username=${encodeURIComponent(profile?.username || '')}&password=${encodeURIComponent(profile?.password || '')}&url=${encodeURIComponent(profile?.url || '')}&container=${containerExtension}`);
+        router.push(`/player/episode/${episodeId}?container=${containerExtension}`);
     };
 
     // Mostrar spinner enquanto o perfil ou as informações da série estão carregando
@@ -187,7 +187,7 @@ export default function SeriesDetailsPage({ params }: { params: Usable<{ id: str
                 <Link href="/series" className="text-blue-400 hover:text-blue-300 mr-4">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                    </svg>s
+                    </svg>
                 </Link>
                 <h1 className="text-xl md:text-2xl font-bold">{seriesInfo.info.name}</h1>
             </div>

@@ -1,560 +1,787 @@
 "use client";
 
+import { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  Play,
+  Pause,
+  Volume2,
+  VolumeX,
+  Maximize,
+  Minimize,
+  Settings,
+  ArrowLeft,
+  SkipBack,
+  SkipForward,
+  Subtitles,
+  ChevronLeft,
+  ChevronRight,
+  Radio,
+  Film,
+  MonitorPlay,
+  Loader2,
+  Clock,
+  Calendar,
+  User,
+  Star
+} from 'lucide-react';
 import Hls from 'hls.js';
-import { useEffect, useRef, useState } from 'react';
 
-interface CustomVideoPlayerProps {
-    streamUrl: string;
-    streamType: 'live' | 'movie' | 'episode';
-    streamInfo?: {
-        title?: string;
-        description?: string;
-        genre?: string;
-        duration?: string | number;
-        year?: string;
-        director?: string;
-        cast?: string;
-        [key: string]: string | number | boolean | undefined;
-    };
-    onBack?: () => void;
-    episodeData?: {
-        seriesId?: string;
-        seasonNumber?: number;
-        episodeNumber?: number;
-        totalEpisodes?: number;
-        nextEpisodeId?: string;
-        prevEpisodeId?: string;
-    };
+interface StreamInfo {
+  title?: string;
+  description?: string;
+  genre?: string;
+  duration?: string | number;
+  year?: string;
+  director?: string;
+  cast?: string;
+  channel?: string;
+  rating?: string;
+  season_number?: string;
+  episode_number?: string;
+  [key: string]: string | number | boolean | undefined;
 }
 
-export function CustomVideoPlayer({
-    streamUrl,
-    streamType,
-    streamInfo,
-    onBack,
-    episodeData
+interface EpisodeData {
+  seriesId?: string;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  totalEpisodes?: number;
+  nextEpisodeId?: string;
+  prevEpisodeId?: string;
+}
+
+interface CustomVideoPlayerProps {
+  streamUrl: string;
+  streamType: 'live' | 'movie' | 'episode';
+  streamInfo?: StreamInfo;
+  onBack?: () => void;
+  episodeData?: EpisodeData;
+}
+
+export default function CustomVideoPlayer({
+  streamUrl,
+  streamType,
+  streamInfo,
+  onBack,
+  episodeData
 }: CustomVideoPlayerProps) {
-    const videoRef = useRef<HTMLVideoElement>(null);
-    const hlsRef = useRef<Hls | null>(null);
-    const playerContainerRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const playerContainerRef = useRef<HTMLDivElement>(null);
+  const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const hlsRef = useRef<Hls | null>(null);
 
-    const [isPlaying, setIsPlaying] = useState(false);
-    const [currentTime, setCurrentTime] = useState(0);
-    const [duration, setDuration] = useState(0);
-    const [volume, setVolume] = useState(1);
-    const [isMuted, setIsMuted] = useState(false);
-    const [isFullscreen, setIsFullscreen] = useState(false);
-    const [showControls, setShowControls] = useState(true);
-    const [buffering, setBuffering] = useState(false);
-    const [showSettings, setShowSettings] = useState(false);
-    const [showSubtitles, setShowSubtitles] = useState(false);
-    const [controlsTimeout, setControlsTimeout] = useState<NodeJS.Timeout | null>(null);
+  // Video state
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [bufferedTime, setBufferedTime] = useState(0);
+  const [volume, setVolume] = useState(0.8);
+  const [isMuted, setIsMuted] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState(1);
 
-    // Initialize HLS player
-    useEffect(() => {
-        if (!streamUrl || !videoRef.current) return;
+  // UI state
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showControls, setShowControls] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
+  const [isBuffering, setIsBuffering] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [quality, setQuality] = useState('auto');
 
-        // Cleanup previous HLS instance if it exists
-        if (hlsRef.current) {
-            hlsRef.current.destroy();
-            hlsRef.current = null;
-        }
+  // Advanced features
+  const [showSubtitles, setShowSubtitles] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [autoPlayNext, setAutoPlayNext] = useState(true);
 
-        // Check if the URL is an HLS stream
-        const isHLSStream = streamUrl.endsWith('.m3u8');
+  // Performance optimization: Update progress less frequently
+  const updateProgress = useCallback(() => {
+    if (videoRef.current && !isDragging) {
+      setCurrentTime(videoRef.current.currentTime);
 
-        if (isHLSStream && Hls.isSupported()) {
-            const hls = new Hls({
-                enableWorker: true,
-                lowLatencyMode: streamType === 'live', // Enable low latency for live streams
-                backBufferLength: streamType === 'live' ? 30 : 60, // Smaller back buffer for live
-            });
+      // Update buffered time
+      const video = videoRef.current;
+      if (video.buffered.length > 0) {
+        const buffered = video.buffered.end(video.buffered.length - 1);
+        setBufferedTime(buffered);
+      }
+    }
+  }, [isDragging]);
 
-            hls.loadSource(streamUrl);
-            hls.attachMedia(videoRef.current);
-            hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                videoRef.current?.play().catch(error => {
-                    console.error('Error playing video:', error);
-                });
-            });
+  // Apply volume, mute, and playback rate changes
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video) {
+      video.volume = volume;
+    }
+  }, [volume]);
 
-            // Add error handling
-            hls.on(Hls.Events.ERROR, (event, data) => {
-                if (data.fatal) {
-                    switch (data.type) {
-                        case Hls.ErrorTypes.NETWORK_ERROR:
-                            console.error('Network error, trying to recover...');
-                            hls.startLoad();
-                            break;
-                        case Hls.ErrorTypes.MEDIA_ERROR:
-                            console.error('Media error, trying to recover...');
-                            hls.recoverMediaError();
-                            break;
-                        default:
-                            console.error('Fatal error, cannot recover:', data);
-                            hls.destroy();
-                            break;
-                    }
-                }
-            });
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video) {
+      video.muted = isMuted;
+    }
+  }, [isMuted]);
 
-            hlsRef.current = hls;
-        } else {
-            // Fallback to native playback for non-HLS streams
-            videoRef.current.src = streamUrl;
-        }
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video) {
+      video.playbackRate = playbackRate;
+    }
+  }, [playbackRate]);
 
-        // Cleanup function
-        return () => {
-            if (hlsRef.current) {
-                hlsRef.current.destroy();
-                hlsRef.current = null;
-            }
-        };
-    }, [streamUrl, streamType]);
+  // Initialize video and handle events
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !streamUrl) return;
 
-    // Handle video events
-    useEffect(() => {
-        const videoElement = videoRef.current;
-        if (!videoElement) return;
+    // Reset states
+    setError(null);
+    setIsBuffering(true);
 
-        const handlePlay = () => setIsPlaying(true);
-        const handlePause = () => setIsPlaying(false);
-        const handleTimeUpdate = () => setCurrentTime(videoElement.currentTime);
-        const handleDurationChange = () => setDuration(videoElement.duration);
-        const handleVolumeChange = () => {
-            setVolume(videoElement.volume);
-            setIsMuted(videoElement.muted);
-        };
-        const handleWaiting = () => setBuffering(true);
-        const handlePlaying = () => setBuffering(false);
-        const handleEnded = () => {
-            setIsPlaying(false);
-            // Auto-play next episode if available for series
-            if (streamType === 'episode' && episodeData?.nextEpisodeId) {
-                // Logic to play next episode would go here
-                console.log('Auto-playing next episode:', episodeData.nextEpisodeId);
-            }
-        };
+    // Set initial volume
+    video.volume = volume;
+    video.muted = isMuted;
+    video.playbackRate = playbackRate;
 
-        // Add event listeners
-        videoElement.addEventListener('play', handlePlay);
-        videoElement.addEventListener('pause', handlePause);
-        videoElement.addEventListener('timeupdate', handleTimeUpdate);
-        videoElement.addEventListener('durationchange', handleDurationChange);
-        videoElement.addEventListener('volumechange', handleVolumeChange);
-        videoElement.addEventListener('waiting', handleWaiting);
-        videoElement.addEventListener('playing', handlePlaying);
-        videoElement.addEventListener('ended', handleEnded);
+    // Load video source
+    if (streamUrl.endsWith('.m3u8')) {
+      if (Hls.isSupported()) {
+        const hls = new Hls();
+        hlsRef.current = hls;
+        hls.loadSource(streamUrl);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.ERROR, (event, data) => {
+          if (data.fatal) {
+            setError(`Playback error: ${data.details}`);
+            console.error(`HLS.js fatal error: ${data.details}`, data);
+          } else {
+            console.warn(`HLS.js non-fatal error: ${data.details}`, data)
+          }
+        });
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        // Native HLS support (e.g., Safari)
+        video.src = streamUrl;
+      } else {
+        setError('HLS playback is not supported in this browser.');
+        setIsBuffering(false);
+      }
+    } else {
+      video.src = streamUrl;
+    }
 
-        // Cleanup event listeners
-        return () => {
-            videoElement.removeEventListener('play', handlePlay);
-            videoElement.removeEventListener('pause', handlePause);
-            videoElement.removeEventListener('timeupdate', handleTimeUpdate);
-            videoElement.removeEventListener('durationchange', handleDurationChange);
-            videoElement.removeEventListener('volumechange', handleVolumeChange);
-            videoElement.removeEventListener('waiting', handleWaiting);
-            videoElement.removeEventListener('playing', handlePlaying);
-            videoElement.removeEventListener('ended', handleEnded);
-        };
-    }, [streamType, episodeData]);
+    const handleLoadStart = () => setIsBuffering(true);
+    const handleLoadedMetadata = () => {
+      setDuration(video.duration);
+      setIsBuffering(false);
+    };
+    const handleCanPlay = () => setIsBuffering(false);
+    const handlePlay = () => setIsPlaying(true);
+    const handlePause = () => setIsPlaying(false);
+    const handleWaiting = () => setIsBuffering(true);
+    const handlePlaying = () => setIsBuffering(false);
+    const handleTimeUpdate = updateProgress;
+    const handleVolumeChange = () => {
+      setVolume(video.volume);
+      setIsMuted(video.muted);
+    };
+    const handleError = (e: Event) => {
+      const target = e.target as HTMLVideoElement;
+      // Avoid showing generic error if HLS.js is handling it
+      if (!hlsRef.current) {
+        setError(`Video error: ${target.error?.message || 'Unknown error'}`);
+      }
+      setIsBuffering(false);
+    };
+    const handleEnded = () => {
+      setIsPlaying(false);
+      if (streamType === 'episode' && episodeData?.nextEpisodeId && autoPlayNext) {
+        // Auto-play next episode logic would be implemented here
+        console.log('Auto-playing next episode...');
+      }
+    };
 
-    // Handle mouse movement to show/hide controls
-    useEffect(() => {
-        const container = playerContainerRef.current;
-        if (!container) return;
+    // Add event listeners
+    video.addEventListener('loadstart', handleLoadStart);
+    video.addEventListener('loadedmetadata', handleLoadedMetadata);
+    video.addEventListener('canplay', handleCanPlay);
+    video.addEventListener('play', handlePlay);
+    video.addEventListener('pause', handlePause);
+    video.addEventListener('waiting', handleWaiting);
+    video.addEventListener('playing', handlePlaying);
+    video.addEventListener('timeupdate', handleTimeUpdate);
+    video.addEventListener('volumechange', handleVolumeChange);
+    video.addEventListener('error', handleError);
+    video.addEventListener('ended', handleEnded);
 
-        const handleMouseMove = () => {
-            setShowControls(true);
+    // Cleanup
+    return () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+      video.removeEventListener('loadstart', handleLoadStart);
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      video.removeEventListener('canplay', handleCanPlay);
+      video.removeEventListener('play', handlePlay);
+      video.removeEventListener('pause', handlePause);
+      video.removeEventListener('waiting', handleWaiting);
+      video.removeEventListener('playing', handlePlaying);
+      video.removeEventListener('timeupdate', handleTimeUpdate);
+      video.removeEventListener('volumechange', handleVolumeChange);
+      video.removeEventListener('error', handleError);
+      video.removeEventListener('ended', handleEnded);
+      video.src = '';
+    };
+  }, [streamUrl, updateProgress, streamType, episodeData, autoPlayNext]);
 
-            // Clear existing timeout
-            if (controlsTimeout) {
-                clearTimeout(controlsTimeout);
-            }
+  // Handle mouse movement and controls visibility
+  useEffect(() => {
+    const container = playerContainerRef.current;
+    if (!container) return;
 
-            // Set new timeout to hide controls after 3 seconds
-            const timeout = setTimeout(() => {
-                if (isPlaying) {
-                    setShowControls(false);
-                }
-            }, 3000);
+    const showControlsWithTimeout = () => {
+      setShowControls(true);
 
-            setControlsTimeout(timeout);
-        };
+      if (controlsTimeoutRef.current) {
+        clearTimeout(controlsTimeoutRef.current);
+      }
 
-        container.addEventListener('mousemove', handleMouseMove);
-
-        return () => {
-            container.removeEventListener('mousemove', handleMouseMove);
-            if (controlsTimeout) {
-                clearTimeout(controlsTimeout);
-            }
-        };
-    }, [isPlaying, controlsTimeout]);
-
-    // Handle fullscreen changes
-    useEffect(() => {
-        const handleFullscreenChange = () => {
-            setIsFullscreen(!!document.fullscreenElement);
-        };
-
-        document.addEventListener('fullscreenchange', handleFullscreenChange);
-
-        return () => {
-            document.removeEventListener('fullscreenchange', handleFullscreenChange);
-        };
-    }, []);
-
-    // Player control functions
-    const togglePlay = () => {
-        if (!videoRef.current) return;
-
+      controlsTimeoutRef.current = setTimeout(() => {
         if (isPlaying) {
-            videoRef.current.pause();
-        } else {
-            videoRef.current.play().catch(error => {
-                console.error('Error playing video:', error);
-            });
+          setShowControls(false);
         }
+      }, 3000);
     };
 
-    const toggleMute = () => {
-        if (!videoRef.current) return;
-        videoRef.current.muted = !videoRef.current.muted;
+    const handleMouseMove = showControlsWithTimeout;
+    const handleMouseEnter = () => setShowControls(true);
+    const handleMouseLeave = () => {
+      if (isPlaying) {
+        setShowControls(false);
+      }
     };
 
-    const changeVolume = (newVolume: number) => {
-        if (!videoRef.current) return;
-        videoRef.current.volume = newVolume;
+    container.addEventListener('mousemove', handleMouseMove);
+    container.addEventListener('mouseenter', handleMouseEnter);
+    container.addEventListener('mouseleave', handleMouseLeave);
+
+    return () => {
+      container.removeEventListener('mousemove', handleMouseMove);
+      container.removeEventListener('mouseenter', handleMouseEnter);
+      container.removeEventListener('mouseleave', handleMouseLeave);
+      if (controlsTimeoutRef.current) {
+        clearTimeout(controlsTimeoutRef.current);
+      }
+    };
+  }, [isPlaying]);
+
+  // Handle fullscreen changes
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
     };
 
-    const seek = (time: number) => {
-        if (!videoRef.current) return;
-        videoRef.current.currentTime = time;
-    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
 
-    const toggleFullscreen = () => {
-        const container = playerContainerRef.current;
-        if (!container) return;
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!videoRef.current) return;
 
-        if (!document.fullscreenElement) {
-            container.requestFullscreen().catch(err => {
-                console.error('Error attempting to enable fullscreen:', err);
-            });
-        } else {
+      switch (e.key) {
+        case ' ':
+        case 'k':
+          e.preventDefault();
+          togglePlayPause();
+          break;
+        case 'm':
+          toggleMute();
+          break;
+        case 'f':
+          toggleFullscreen();
+          break;
+        case 'ArrowLeft':
+          seek(currentTime - 10);
+          break;
+        case 'ArrowRight':
+          seek(currentTime + 10);
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          changeVolume(Math.min(1, volume + 0.1));
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          changeVolume(Math.max(0, volume - 0.1));
+          break;
+        case 'Escape':
+          if (isFullscreen) {
             document.exitFullscreen();
-        }
+          }
+          break;
+      }
     };
 
-    // Format time (seconds to MM:SS or HH:MM:SS)
-    const formatTime = (timeInSeconds: number) => {
-        if (isNaN(timeInSeconds)) return '00:00';
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [currentTime, volume, isFullscreen]);
 
-        const hours = Math.floor(timeInSeconds / 3600);
-        const minutes = Math.floor((timeInSeconds % 3600) / 60);
-        const seconds = Math.floor(timeInSeconds % 60);
+  // Control functions
+  const togglePlayPause = useCallback(() => {
+    if (!videoRef.current) return;
 
-        if (hours > 0) {
-            return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-        }
+    if (isPlaying) {
+      videoRef.current.pause();
+    } else {
+      videoRef.current.play().catch(console.error);
+    }
+  }, [isPlaying]);
 
-        return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-    };
+  const toggleMute = useCallback(() => {
+    if (!videoRef.current) return;
+    videoRef.current.muted = !videoRef.current.muted;
+  }, []);
 
-    // Render content-specific controls
-    const renderContentSpecificControls = () => {
-        switch (streamType) {
-            case 'live':
-                return (
-                    <div className="live-controls bg-gray-800 bg-opacity-80 p-2 rounded-md">
-                        <span className="text-red-500 flex items-center">
-                            <span className="h-2 w-2 bg-red-500 rounded-full mr-2 animate-pulse"></span>
-                            LIVE
-                        </span>
-                        {/* Channel controls would go here */}
-                    </div>
-                );
+  const changeVolume = useCallback((newVolume: number) => {
+    if (!videoRef.current) return;
+    videoRef.current.volume = Math.max(0, Math.min(1, newVolume));
+  }, []);
 
-            case 'movie':
-                return (
-                    <div className="movie-controls flex items-center space-x-4">
-                        {/* Chapter selection would go here */}
-                        <button
-                            onClick={() => setShowSubtitles(!showSubtitles)}
-                            className={`p-1 rounded ${showSubtitles ? 'bg-blue-600' : 'bg-gray-700'}`}
-                            title="Subtitles"
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 4h-1m3 0h-3" />
-                            </svg>
-                        </button>
-                    </div>
-                );
+  const seek = useCallback((time: number) => {
+    if (!videoRef.current) return;
+    const clampedTime = Math.max(0, Math.min(duration, time));
+    videoRef.current.currentTime = clampedTime;
+    setCurrentTime(clampedTime);
+  }, [duration]);
 
-            case 'episode':
-                return (
-                    <div className="episode-controls flex items-center space-x-4">
-                        {episodeData?.prevEpisodeId && (
-                            <button
-                                className="p-1 rounded bg-gray-700 hover:bg-gray-600"
-                                title="Previous Episode"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                                </svg>
-                            </button>
-                        )}
+  const toggleFullscreen = useCallback(() => {
+    const container = playerContainerRef.current;
+    if (!container) return;
 
-                        {episodeData && (
-                            <span className="text-sm">
-                                S{episodeData.seasonNumber} E{episodeData.episodeNumber}
-                            </span>
-                        )}
+    if (!document.fullscreenElement) {
+      container.requestFullscreen().catch(console.error);
+    } else {
+      document.exitFullscreen();
+    }
+  }, []);
 
-                        {episodeData?.nextEpisodeId && (
-                            <button
-                                className="p-1 rounded bg-gray-700 hover:bg-gray-600"
-                                title="Next Episode"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                </svg>
-                            </button>
-                        )}
-                    </div>
-                );
+  const changePlaybackRate = useCallback((rate: number) => {
+    if (!videoRef.current) return;
+    videoRef.current.playbackRate = rate;
+    setPlaybackRate(rate);
+  }, []);
 
-            default:
-                return null;
-        }
-    };
+  // Utility functions
+  const formatTime = (seconds: number) => {
+    if (isNaN(seconds)) return '00:00';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    return h > 0 ? `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}` : `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const getStreamTypeIcon = () => {
+    switch (streamType) {
+      case 'live': return <Radio className="w-4 h-4" />;
+      case 'movie': return <Film className="w-4 h-4" />;
+      case 'episode': return <MonitorPlay className="w-4 h-4" />;
+      default: return null;
+    }
+  };
+
+  const renderStreamInfo = () => {
+    if (!streamInfo) return null;
 
     return (
-        <div
-            ref={playerContainerRef}
-            className="relative w-full h-full bg-black overflow-hidden"
-        >
-            {/* Video Element */}
-            <video
-                ref={videoRef}
-                className="w-full h-full object-contain"
-                playsInline
-                onClick={togglePlay}
-            />
+      <div className="bg-black/80 backdrop-blur-sm p-4 rounded-lg max-w-md">
+        <div className="flex items-center gap-2 mb-2">
+          {getStreamTypeIcon()}
+          <span className="text-sm font-medium text-blue-400 uppercase tracking-wide">
+            {streamType === 'live' ? 'Live TV' : streamType === 'movie' ? 'Movie' : 'Episode'}
+          </span>
+        </div>
 
-            {/* Buffering Indicator */}
-            {buffering && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50">
-                    <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                </div>
+        <h3 className="text-lg font-semibold mb-2 text-white">{streamInfo.title}</h3>
+
+        {streamInfo.description && (
+          <p className="text-sm text-gray-300 mb-3 line-clamp-3">{streamInfo.description}</p>
+        )}
+
+        <div className="grid grid-cols-2 gap-2 text-xs text-gray-400">
+          {streamInfo.year && (
+            <div className="flex items-center gap-1">
+              <Calendar className="w-3 h-3" />
+              <span>{streamInfo.year}</span>
+            </div>
+          )}
+          {streamInfo.genre && (
+            <div className="flex items-center gap-1">
+              <Star className="w-3 h-3" />
+              <span>{streamInfo.genre}</span>
+            </div>
+          )}
+          {streamInfo.director && (
+            <div className="flex items-center gap-1">
+              <User className="w-3 h-3" />
+              <span>{streamInfo.director}</span>
+            </div>
+          )}
+          {streamInfo.rating && (
+            <div className="flex items-center gap-1">
+              <Star className="w-3 h-3" />
+              <span>{streamInfo.rating}</span>
+            </div>
+          )}
+          {streamType === 'episode' && episodeData && (
+            <div className="col-span-2 text-blue-400">
+              S{episodeData.seasonNumber} E{episodeData.episodeNumber}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderContentSpecificControls = () => {
+    switch (streamType) {
+      case 'live':
+        return (
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 bg-red-600 px-2 py-1 rounded-full text-xs font-medium">
+              <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
+              LIVE
+            </div>
+          </div>
+        );
+
+      case 'episode':
+        return (
+          <div className="flex items-center gap-2">
+            {episodeData?.prevEpisodeId && (
+              <button
+                className="p-2 hover:bg-white/20 rounded-full transition-colors"
+                title="Previous Episode"
+              >
+                <ChevronLeft className="w-5 h-5" />
+              </button>
             )}
 
-            {/* Controls Overlay */}
-            <div
-                className={`absolute inset-0 flex flex-col justify-between transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0'}`}
-                style={{ pointerEvents: showControls ? 'auto' : 'none' }}
+            {episodeData && (
+              <span className="text-sm font-medium px-2">
+                S{episodeData.seasonNumber} E{episodeData.episodeNumber}
+              </span>
+            )}
+
+            {episodeData?.nextEpisodeId && (
+              <button
+                className="p-2 hover:bg-white/20 rounded-full transition-colors"
+                title="Next Episode"
+              >
+                <ChevronRight className="w-5 h-5" />
+              </button>
+            )}
+          </div>
+        );
+
+      case 'movie':
+        return (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowSubtitles(!showSubtitles)}
+              className={`p-2 rounded-full transition-colors ${showSubtitles ? 'bg-blue-600' : 'hover:bg-white/20'}`}
+              title="Subtitles"
             >
-                {/* Top Controls */}
-                <div className="p-4 bg-gradient-to-b from-black to-transparent">
-                    <div className="flex justify-between items-center">
-                        {/* Back Button */}
-                        <button
-                            onClick={onBack}
-                            className="text-white hover:text-blue-400 transition-colors"
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                            </svg>
-                        </button>
-                        {streamInfo?.title && <h1 className="text-lg font-semibold truncate max-w-[70%]">{streamInfo.title}</h1>}
-                        <div className="flex items-center space-x-2">
-                            {/* Settings button */}
-                            <button
-                                onClick={() => setShowSettings(!showSettings)}
-                                className="text-white hover:text-blue-400 transition-colors"
-                                title="Settings"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                </svg>
-                            </button>
-                        </div>
-                    </div>
-                </div>
+              <Subtitles className="w-5 h-5" />
+            </button>
+          </div>
+        );
 
-                {/* Center Play/Pause Button */}
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    {!isPlaying && (
-                        <button
-                            onClick={togglePlay}
-                            className="w-20 h-20 bg-black bg-opacity-50 rounded-full flex items-center justify-center pointer-events-auto"
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                        </button>
-                    )}
-                </div>
+      default:
+        return null;
+    }
+  };
 
-                {/* Bottom Controls */}
-                <div className="p-4 bg-gradient-to-t from-black to-transparent">
-                    {/* Progress Bar */}
-                    <div className="mb-2 relative">
-                        <input
-                            type="range"
-                            min="0"
-                            max={duration || 100}
-                            value={currentTime}
-                            onChange={(e) => seek(parseFloat(e.target.value))}
-                            className="w-full h-1 bg-gray-700 rounded-full appearance-none cursor-pointer"
-                            style={{
-                                background: `linear-gradient(to right, #3b82f6 ${(currentTime / (duration || 1)) * 100}%, #374151 ${(currentTime / (duration || 1)) * 100}%)`
-                            }}
-                        />
-                    </div>
+  if (error) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-black text-white">
+        <div className="text-center p-8">
+          <div className="text-red-500 text-6xl mb-4">⚠</div>
+          <h3 className="text-xl mb-2">Playback Error</h3>
+          <p className="text-gray-400 mb-4">{error}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
-                    <div className="flex justify-between items-center">
-                        <div className="flex items-center space-x-4">
-                            {/* Play/Pause Button */}
-                            <button onClick={togglePlay} className="text-white hover:text-blue-400 transition-colors">
-                                {isPlaying ? (
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                    </svg>
-                                ) : (
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                    </svg>
-                                )}
-                            </button>
+  return (
+    <div
+      ref={playerContainerRef}
+      className="relative w-full h-full bg-black overflow-hidden group"
+    >
+      {/* Video Element */}
+      <video
+        ref={videoRef}
+        className="w-full h-full object-contain cursor-pointer"
+        playsInline
+        onClick={togglePlayPause}
+        onDoubleClick={toggleFullscreen}
+      />
 
-                            {/* Volume Control */}
-                            <div className="flex items-center space-x-2">
-                                <button onClick={toggleMute} className="text-white hover:text-blue-400 transition-colors">
-                                    {isMuted || volume === 0 ? (
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" clipRule="evenodd" />
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
-                                        </svg>
-                                    ) : volume < 0.5 ? (
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" clipRule="evenodd" />
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072" />
-                                        </svg>
-                                    ) : (
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" clipRule="evenodd" />
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072" />
-                                        </svg>
-                                    )}
-                                </button>
-                                <input
-                                    type="range"
-                                    min="0"
-                                    max="1"
-                                    step="0.01"
-                                    value={isMuted ? 0 : volume}
-                                    onChange={(e) => changeVolume(parseFloat(e.target.value))}
-                                    className="w-16 h-1 bg-gray-700 rounded-full appearance-none cursor-pointer"
-                                    style={{
-                                        background: `linear-gradient(to right, #3b82f6 ${(isMuted ? 0 : volume) * 100}%, #374151 ${(isMuted ? 0 : volume) * 100}%)`
-                                    }}
-                                />
-                            </div>
+      {/* Loading/Buffering Overlay */}
+      {isBuffering && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+          <div className="flex flex-col items-center gap-3">
+            <Loader2 className="w-12 h-12 animate-spin text-blue-500" />
+            <span className="text-white text-sm">Loading...</span>
+          </div>
+        </div>
+      )}
 
-                            {/* Time Display */}
-                            <div className="text-sm text-gray-300">
-                                {formatTime(currentTime)} / {formatTime(duration)}
-                            </div>
-                        </div>
+      {/* Controls Overlay */}
+      <div
+        className={`absolute inset-0 transition-opacity duration-300 ${
+          showControls ? 'opacity-100' : 'opacity-0'
+        } ${showControls ? 'pointer-events-auto' : 'pointer-events-none'}`}
+      >
+        {/* Top Bar */}
+        <div className="absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-black/80 to-transparent">
+          <div className="flex items-center justify-between">
+            <button
+              onClick={onBack}
+              className="p-2 hover:bg-white/20 rounded-full transition-colors"
+            >
+              <ArrowLeft className="w-6 h-6" />
+            </button>
 
-                        <div className="flex items-center space-x-4">
-                            {/* Content-specific controls */}
-                            {renderContentSpecificControls()}
-
-                            {/* Fullscreen Button */}
-                            <button onClick={toggleFullscreen} className="text-white hover:text-blue-400 transition-colors">
-                                {isFullscreen ? (
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9V4.5M9 9H4.5M15 9H19.5M15 9V4.5M15 15v4.5M15 15H4.5M15 15h4.5M9 15v4.5" />
-                                    </svg>
-                                ) : (
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5" />
-                                    </svg>
-                                )}
-                            </button>
-                        </div>
-                    </div>
-                </div>
+            <div className="flex-1 px-4">
+              {streamInfo?.title && (
+                <h1 className="text-lg font-semibold truncate">{streamInfo.title}</h1>
+              )}
             </div>
 
-            {/* Settings Panel */}
-            {showSettings && (
-                <div className="absolute right-4 bottom-20 bg-gray-800 bg-opacity-90 p-4 rounded-md shadow-lg">
-                    <h3 className="text-white font-semibold mb-2">Settings</h3>
-                    <div className="space-y-2">
-                        {/* Quality settings would go here */}
-                        <div className="flex items-center justify-between">
-                            <span>Quality</span>
-                            <select className="bg-gray-700 text-white rounded px-2 py-1">
-                                <option value="auto">Auto</option>
-                                <option value="1080p">1080p</option>
-                                <option value="720p">720p</option>
-                                <option value="480p">480p</option>
-                                <option value="360p">360p</option>
-                            </select>
-                        </div>
-
-                        {/* Playback speed */}
-                        <div className="flex items-center justify-between">
-                            <span>Speed</span>
-                            <select
-                                className="bg-gray-700 text-white rounded px-2 py-1"
-                                onChange={(e) => {
-                                    if (videoRef.current) {
-                                        videoRef.current.playbackRate = parseFloat(e.target.value);
-                                    }
-                                }}
-                                defaultValue="1"
-                            >
-                                <option value="0.5">0.5x</option>
-                                <option value="0.75">0.75x</option>
-                                <option value="1">Normal</option>
-                                <option value="1.25">1.25x</option>
-                                <option value="1.5">1.5x</option>
-                                <option value="2">2x</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Stream Info (if available) */}
-            {streamInfo && (
-                <div className="absolute left-0 right-0 bottom-0 p-4 bg-gradient-to-t from-black to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300">
-                    <div className="flex flex-col space-y-1">
-                        {streamInfo.title && (
-                            <h2 className="text-lg font-semibold">{streamInfo.title}</h2>
-                        )}
-                        {streamInfo.description && (
-                            <p className="text-sm text-gray-300">{streamInfo.description}</p>
-                        )}
-                        <div className="flex flex-wrap gap-2 text-xs text-gray-400">
-                            {streamInfo.year && <span>Year: {streamInfo.year}</span>}
-                            {streamInfo.genre && <span>• Genre: {streamInfo.genre}</span>}
-                            {streamInfo.director && <span>• Director: {streamInfo.director}</span>}
-                            {streamInfo.cast && <span>• Cast: {streamInfo.cast}</span>}
-                            {streamType === 'live' && streamInfo.channel && <span>• Channel: {streamInfo.channel}</span>}
-                        </div>
-                    </div>
-                </div>
-            )}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowInfo(!showInfo)}
+                className="p-2 hover:bg-white/20 rounded-full transition-colors"
+                title="Info"
+              >
+                <Clock className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => setShowSettings(!showSettings)}
+                className="p-2 hover:bg-white/20 rounded-full transition-colors"
+                title="Settings"
+              >
+                <Settings className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
         </div>
-    );
+
+        {/* Center Play Button */}
+        {!isPlaying && !isBuffering && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <button
+              onClick={togglePlayPause}
+              className="w-20 h-20 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center transition-colors pointer-events-auto"
+            >
+              <Play className="w-10 h-10 ml-1" fill="currentColor" />
+            </button>
+          </div>
+        )}
+
+        {/* Bottom Controls */}
+        <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent">
+          {/* Progress Bar */}
+          <div className="mb-4">
+            <div className="relative h-1 bg-white/20 rounded-full cursor-pointer group">
+              {/* Buffered progress */}
+              <div
+                className="absolute top-0 left-0 h-full bg-white/30 rounded-full"
+                style={{ width: `${(bufferedTime / duration) * 100 || 0}%` }}
+              />
+              {/* Current progress */}
+              <div
+                className="absolute top-0 left-0 h-full bg-blue-500 rounded-full"
+                style={{ width: `${(currentTime / duration) * 100 || 0}%` }}
+              />
+              {/* Scrubber */}
+              <input
+                type="range"
+                min="0"
+                max={duration || 100}
+                value={currentTime}
+                onChange={(e) => {
+                  setIsDragging(true);
+                  const time = parseFloat(e.target.value);
+                  setCurrentTime(time);
+                }}
+                onMouseUp={(e) => {
+                  setIsDragging(false);
+                  seek(parseFloat((e.target as HTMLInputElement).value));
+                }}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              />
+              <div
+                className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-blue-500 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                style={{ left: `${(currentTime / duration) * 100 || 0}%`, transform: 'translateX(-50%) translateY(-50%)' }}
+              />
+            </div>
+          </div>
+
+          {/* Control Bar */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              {/* Play/Pause */}
+              <button onClick={togglePlayPause} className="p-2 hover:bg-white/20 rounded-full transition-colors">
+                {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" fill="currentColor" />}
+              </button>
+
+              {/* Skip buttons for episodes */}
+              {streamType === 'episode' && (
+                <>
+                  <button className="p-2 hover:bg-white/20 rounded-full transition-colors">
+                    <SkipBack className="w-5 h-5" />
+                  </button>
+                  <button className="p-2 hover:bg-white/20 rounded-full transition-colors">
+                    <SkipForward className="w-5 h-5" />
+                  </button>
+                </>
+              )}
+
+              {/* Volume */}
+              <div className="flex items-center gap-2 group/volume">
+                <button onClick={toggleMute} className="p-2 hover:bg-white/20 rounded-full transition-colors">
+                  {isMuted || volume === 0 ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+                </button>
+                <div className="w-0 group-hover/volume:w-20 transition-all duration-200 overflow-hidden">
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={isMuted ? 0 : volume}
+                    onChange={(e) => changeVolume(parseFloat(e.target.value))}
+                    className="w-20 h-1 bg-white/20 rounded-full appearance-none cursor-pointer slider"
+                  />
+                </div>
+              </div>
+
+              {/* Time Display */}
+              <div className="text-sm text-white/80 font-mono">
+                {formatTime(currentTime)} / {formatTime(duration)}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* Content-specific controls */}
+              {renderContentSpecificControls()}
+
+              {/* Fullscreen */}
+              <button onClick={toggleFullscreen} className="p-2 hover:bg-white/20 rounded-full transition-colors">
+                {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Settings Panel */}
+        {showSettings && (
+          <div className="absolute right-4 bottom-20 bg-black/90 backdrop-blur-sm p-4 rounded-lg shadow-xl min-w-48">
+            <h3 className="text-white font-semibold mb-3">Settings</h3>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm">Quality</span>
+                <select
+                  value={quality}
+                  onChange={(e) => setQuality(e.target.value)}
+                  className="bg-white/10 text-white text-sm rounded px-2 py-1 border-0 outline-0"
+                >
+                  <option value="auto">Auto</option>
+                  <option value="1080p">1080p</option>
+                  <option value="720p">720p</option>
+                  <option value="480p">480p</option>
+                  <option value="360p">360p</option>
+                </select>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-sm">Speed</span>
+                <select
+                  value={playbackRate}
+                  onChange={(e) => changePlaybackRate(parseFloat(e.target.value))}
+                  className="bg-white/10 text-white text-sm rounded px-2 py-1 border-0 outline-0"
+                >
+                  <option value="0.5">0.5x</option>
+                  <option value="0.75">0.75x</option>
+                  <option value="1">Normal</option>
+                  <option value="1.25">1.25x</option>
+                  <option value="1.5">1.5x</option>
+                  <option value="2">2x</option>
+                </select>
+              </div>
+
+              {streamType === 'episode' && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Auto-play Next</span>
+                  <button
+                    onClick={() => setAutoPlayNext(!autoPlayNext)}
+                    className={`w-10 h-5 rounded-full transition-colors relative ${
+                      autoPlayNext ? 'bg-blue-600' : 'bg-white/20'
+                    }`}
+                  >
+                    <div
+                      className={`w-4 h-4 bg-white rounded-full absolute top-0.5 transition-transform ${
+                        autoPlayNext ? 'translate-x-5' : 'translate-x-0.5'
+                      }`}
+                    />
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Info Panel */}
+        {showInfo && streamInfo && (
+          <div className="absolute left-4 bottom-20">
+            {renderStreamInfo()}
+          </div>
+        )}
+      </div>
+
+      <style jsx>{`
+        .slider::-webkit-slider-thumb {
+          appearance: none;
+          width: 12px;
+          height: 12px;
+          border-radius: 50%;
+          background: #3b82f6;
+          cursor: pointer;
+        }
+
+        .slider::-webkit-slider-track {
+          width: 100%;
+          height: 4px;
+          background: rgba(255, 255, 255, 0.2);
+          border-radius: 2px;
+        }
+
+        .line-clamp-3 {
+          display: -webkit-box;
+          -webkit-line-clamp: 3;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+        }
+      `}</style>
+    </div>
+  );
 }
