@@ -352,9 +352,15 @@ export default function CustomVideoPlayer({
   const seek = useCallback((time: number) => {
     if (!videoRef.current) return;
     const clampedTime = Math.max(0, Math.min(duration, time));
+    const wasPlaying = isPlaying;
     videoRef.current.currentTime = clampedTime;
     setCurrentTime(clampedTime);
-  }, [duration]);
+
+    // Resume playback if video was playing before seeking
+    if (wasPlaying) {
+      videoRef.current.play().catch(console.error);
+    }
+  }, [duration, isPlaying]);
 
   const toggleFullscreen = useCallback(() => {
     const container = playerContainerRef.current;
@@ -602,7 +608,24 @@ export default function CustomVideoPlayer({
         <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent">
           {/* Progress Bar */}
           <div className="mb-4">
-            <div className="relative h-1 bg-white/20 rounded-full cursor-pointer group">
+            <div className="relative h-1 bg-white/20 rounded-full cursor-pointer group"
+              onClick={(e) => {
+                const container = e.currentTarget;
+                const rect = container.getBoundingClientRect();
+                const pos = (e.clientX - rect.left) / rect.width;
+                const newTime = pos * duration;
+
+                // Apply the new time
+                if (videoRef.current) {
+                  videoRef.current.currentTime = newTime;
+                  setCurrentTime(newTime);
+
+                  // Resume playback if video was playing
+                  if (isPlaying) {
+                    videoRef.current.play().catch(console.error);
+                  }
+                }
+              }}>
               {/* Buffered progress */}
               <div
                 className="absolute top-0 left-0 h-full bg-white/30 rounded-full"
@@ -623,10 +646,24 @@ export default function CustomVideoPlayer({
                   setIsDragging(true);
                   const time = parseFloat(e.target.value);
                   setCurrentTime(time);
+                  // Update video time directly
+                  if (videoRef.current) {
+                    videoRef.current.currentTime = time;
+                  }
                 }}
-                onMouseUp={(e) => {
+                onMouseUp={() => {
                   setIsDragging(false);
-                  seek(parseFloat((e.target as HTMLInputElement).value));
+                  // Resume playback if it was playing
+                  if (isPlaying && videoRef.current) {
+                    videoRef.current.play().catch(console.error);
+                  }
+                }}
+                onTouchEnd={() => {
+                  setIsDragging(false);
+                  // Resume playback if it was playing
+                  if (isPlaying && videoRef.current) {
+                    videoRef.current.play().catch(console.error);
+                  }
                 }}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               />
